@@ -25,7 +25,7 @@ class MonodepthOptions:
                                  type=str,
                                  help="log directory",
                                  default=os.path.join(os.path.expanduser("~"), "tmp"))
-
+        
         # TRAINING options
         self.parser.add_argument("--model_name",
                                  type=str,
@@ -202,6 +202,15 @@ class MonodepthOptions:
                                  help="if set will perform the flipping post processing "
                                       "from the original monodepth paper",
                                  action="store_true")
+        
+        # JINLOVESPHO options
+        self.parser.add_argument('--wandb', action='store_true' )
+        self.parser.add_argument('--wdb_proj_name', type=str)
+        self.parser.add_argument('--wdb_exp_name', type=str)
+        self.parser.add_argument('--wdb_log_path', type=str)
+        
+        self.parser.add_argument('--seed', type=int)
+        
 
     def parse(self):
         self.options = self.parser.parse_args()

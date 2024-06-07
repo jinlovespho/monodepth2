@@ -16,6 +16,22 @@ import torch
 import torch.utils.data as data
 from torchvision import transforms
 
+import sys
+import pdb
+
+class ForkedPdb(pdb.Pdb):
+    """
+    PDB Subclass for debugging multi-processed code
+    Suggested in: https://stackoverflow.com/questions/4716533/how-to-attach-debugger-to-a-python-subproccess
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+
 
 def pil_loader(path):
     # open path as file to avoid ResourceWarning
@@ -173,8 +189,7 @@ class MonoDataset(data.Dataset):
             inputs[("inv_K", scale)] = torch.from_numpy(inv_K)
 
         if do_color_aug:
-            color_aug = transforms.ColorJitter.get_params(
-                self.brightness, self.contrast, self.saturation, self.hue)
+            color_aug = transforms.ColorJitter( self.brightness, self.contrast, self.saturation, self.hue)
         else:
             color_aug = (lambda x: x)
 
@@ -188,6 +203,12 @@ class MonoDataset(data.Dataset):
             depth_gt = self.get_depth(folder, frame_index, side, do_flip)
             inputs["depth_gt"] = np.expand_dims(depth_gt, 0)
             inputs["depth_gt"] = torch.from_numpy(inputs["depth_gt"].astype(np.float32))
+
+        # from torchvision.utils import save_image 
+        # save_image(inputs['depth_gt'], '../d1.jpg')
+        # save_image(inputs['depth_gt'], '../d1_n.jpg', normalize=True)
+        # ForkedPdb().set_trace()
+        
 
         if "s" in self.frame_idxs:
             stereo_T = np.eye(4, dtype=np.float32)
