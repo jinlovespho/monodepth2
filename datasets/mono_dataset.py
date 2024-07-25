@@ -15,6 +15,25 @@ from PIL import Image  # using pillow-simd for increased speed
 import torch
 import torch.utils.data as data
 from torchvision import transforms
+import torchvision.transforms.functional as F
+
+class Lambda:
+    """Apply a user-defined lambda as a transform. This transform does not support torchscript.
+
+    Args:
+        lambd (function): Lambda/function to be used for transform.
+    """
+
+    def __init__(self, lambd):
+        if not callable(lambd):
+            raise TypeError("Argument lambd should be callable, got {}".format(repr(type(lambd).__name__)))
+        self.lambd = lambd
+
+    def __call__(self, img):
+        return self.lambd(img)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
 
 
 def pil_loader(path):
@@ -71,6 +90,7 @@ class MonoDataset(data.Dataset):
             self.contrast = (0.8, 1.2)
             self.saturation = (0.8, 1.2)
             self.hue = (-0.1, 0.1)
+            
             transforms.ColorJitter.get_params(
                 self.brightness, self.contrast, self.saturation, self.hue)
         except TypeError:
@@ -171,10 +191,26 @@ class MonoDataset(data.Dataset):
 
             inputs[("K", scale)] = torch.from_numpy(K)
             inputs[("inv_K", scale)] = torch.from_numpy(inv_K)
-
+        
+        # JINLOVESPHO
         if do_color_aug:
-            color_aug = transforms.ColorJitter.get_params(
-                self.brightness, self.contrast, self.saturation, self.hue)
+
+            rnd_idx, b, c, s, h = transforms.ColorJitter.get_params(self.brightness, self.contrast, self.saturation, self.hue)
+         
+            trans_lst=[]
+            
+            for idx in rnd_idx:
+                if idx==0 and b is not None:
+                    trans_lst.append(lambda img: F.adjust_brightness(img, b))
+                elif idx==1 and c is not None:
+                    trans_lst.append(lambda img: F.adjust_contrast(img, c))
+                elif idx==2 and s is not None:
+                    trans_lst.append(lambda img: F.adjust_saturation(img, s))
+                elif idx==3 and h is not None:
+                    trans_lst.append(lambda img: F.adjust_hue(img, h))
+
+            color_aug = transforms.Compose(trans_lst)
+
         else:
             color_aug = (lambda x: x)
 

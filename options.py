@@ -27,6 +27,8 @@ class MonodepthOptions:
                                  default=os.path.join(os.path.expanduser("~"), "tmp"))
 
         # TRAINING options
+        self.parser.add_argument('--pretrained_weight', type=str)
+        
         self.parser.add_argument("--model_name",
                                  type=str,
                                  help="the name of the folder to save the model in",
@@ -153,6 +155,9 @@ class MonodepthOptions:
                                  default=["encoder", "depth", "pose_encoder", "pose"])
 
         # LOGGING options
+        self.parser.add_argument('--wandb', action='store_true')
+        self.parser.add_argument('--wandb_proj_name', type=str)
+        self.parser.add_argument('--wandb_exp_name', type=str)
         self.parser.add_argument("--log_frequency",
                                  type=int,
                                  help="number of batches between each tensorboard log",
@@ -161,6 +166,7 @@ class MonodepthOptions:
                                  type=int,
                                  help="number of epochs between each save",
                                  default=1)
+        self.parser.add_argument('--memo', type=str)
 
         # EVALUATION options
         self.parser.add_argument("--eval_stereo",

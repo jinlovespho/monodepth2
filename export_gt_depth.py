@@ -1,10 +1,9 @@
-# Copyright Niantic 2019. Patent Pending. All rights reserved.
+# Copyright Niantic 2021. Patent Pending. All rights reserved.
 #
-# This software is licensed under the terms of the Monodepth2 licence
+# This software is licensed under the terms of the ManyDepth licence
 # which allows for non-commercial use only, the full terms of which are made
 # available in the LICENSE file.
 
-from __future__ import absolute_import, division, print_function
 
 import os
 
@@ -39,7 +38,7 @@ def export_gt_depths_kitti():
     gt_depths = []
     for line in lines:
 
-        folder, frame_id, _ = line.split()
+        folder, frame_id, _ = line.split()  # '2011_09_26/2011_09_26_drive_0002_sync 0000000069 l'
         frame_id = int(frame_id)
 
         if opt.split == "eigen":
@@ -47,18 +46,20 @@ def export_gt_depths_kitti():
             velo_filename = os.path.join(opt.data_path, folder,
                                          "velodyne_points/data", "{:010d}.bin".format(frame_id))
             gt_depth = generate_depth_map(calib_dir, velo_filename, 2, True)
+            print(velo_filename)
         elif opt.split == "eigen_benchmark":
-            gt_depth_path = os.path.join(opt.data_path, folder, "proj_depth",
-                                         "groundtruth", "image_02", "{:010d}.png".format(frame_id))
+            folder = folder.split('/')[-1]
+            gt_depth_path = os.path.join(f'{opt.data_path}/train_and_val', folder, "proj_depth", "groundtruth", "image_02", "{:010d}.png".format(frame_id))
             gt_depth = np.array(pil.open(gt_depth_path)).astype(np.float32) / 256
-
+            print(gt_depth_path)
+            
         gt_depths.append(gt_depth.astype(np.float32))
 
     output_path = os.path.join(split_folder, "gt_depths.npz")
 
     print("Saving to {}".format(opt.split))
 
-    np.savez_compressed(output_path, data=np.array(gt_depths))
+    np.savez_compressed(output_path, data=np.array(gt_depths, dtype=object))
 
 
 if __name__ == "__main__":

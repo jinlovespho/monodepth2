@@ -74,17 +74,15 @@ def evaluate(opt):
 
         print("-> Loading weights from {}".format(opt.load_weights_folder))
 
-        filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
+        filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))   # splits/eigen or eigen_benchmark
         encoder_path = os.path.join(opt.load_weights_folder, "encoder.pth")
         decoder_path = os.path.join(opt.load_weights_folder, "depth.pth")
 
         encoder_dict = torch.load(encoder_path)
 
-        dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
-                                           encoder_dict['height'], encoder_dict['width'],
-                                           [0], 4, is_train=False)
-        dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers,
-                                pin_memory=True, drop_last=False)
+        dataset = datasets.KITTIRAWDataset(opt.data_path, filenames, encoder_dict['height'], encoder_dict['width'], [0], 4, is_train=False)
+        dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers, pin_memory=True, drop_last=False)
+
 
         encoder = networks.ResnetEncoder(opt.num_layers, False)
         depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
@@ -97,25 +95,78 @@ def evaluate(opt):
         encoder.eval()
         depth_decoder.cuda()
         depth_decoder.eval()
+        
+        from networks.pho_models.vit import ViT
+        from networks.pho_models.sf_depth_selfsup_try1 import SF_Depth_SelfSup_Try1
+        from networks.resnet_encoder import ResnetEncoder
+        from networks.pose_decoder import PoseDecoder
+        
+        model={}
+        v = ViT(image_size = (384,384),        # DPT 의 ViT-Base setting 그대로 가져옴. 
+                patch_size = 16,
+                num_classes = 1000,
+                dim = 768,
+                depth = 12,                     # transformer 의 layer(attention+ff) 개수 의미
+                heads = 12,
+                mlp_dim = 3072)
+        
+        is_well_loaded=v.load_state_dict(torch.load("/home/cvlab05/project/jinlovespho/github/monodepth/pho_mfd4/MaskingDepth/pretrained_weights/vit_base_384.pth"))
+        print(is_well_loaded)
+            
+        v.resize_pos_embed(192,640)
+        
+        model['depth'] = SF_Depth_SelfSup_Try1( encoder=v,
+                                                max_depth = 100.0,
+                                                features=[96, 192, 384, 768],           # 무슨 feature ?
+                                                hooks=[2, 5, 8, 11],                    # hooks ?
+                                                vit_features=768,                       # embed dim ? yes!
+                                                use_readout='project')
+        
+        # load monodepth2 pose network
+        model["pose_encoder"] = ResnetEncoder(18,True,num_input_images=2 )
+        model["pose_decoder"] = PoseDecoder(   model["pose_encoder"].num_ch_enc,
+                                                                            num_input_features=1,
+                                                                            num_frames_to_predict_for=2)
+        
+        ckpt_path=f'/media/data1/jinlovespho/log/mfdepth/pho_server5_gpu1_kitti_bs16_sf_selfsup_try1_eigenzhou_re_depth_metric_maxdepth80_cornersTrue/weights_20'
+        depth_weight=f'{ckpt_path}/depth.pth'
+        pose_enc_weight=f'{ckpt_path}/pose_encoder.pth'
+        pose_dec_weight=f'{ckpt_path}/pose_decoder.pth'
+        
+        depth_weight = torch.load(depth_weight)
+        pose_enc_weight=torch.load(pose_enc_weight)
+        pose_dec_weight=torch.load(pose_dec_weight)
+        
+        msg1=model['depth'].load_state_dict(depth_weight, strict=True)
+        msg2=model['pose_encoder'].load_state_dict(pose_enc_weight, strict=True)
+        msg3=model['pose_decoder'].load_state_dict(pose_dec_weight, strict=True)
+        print(msg1,msg2,msg3)
+    
 
         pred_disps = []
 
-        print("-> Computing predictions with size {}x{}".format(
-            encoder_dict['width'], encoder_dict['height']))
-
+        print("-> Computing predictions with size {}x{}".format(encoder_dict['width'], encoder_dict['height']))
+        
+        from tqdm import tqdm
+        
+        tqdm_val = tqdm(dataloader, desc=f'')
         with torch.no_grad():
-            for data in dataloader:
-                input_color = data[("color", 0, 0)].cuda()
+            for i, data in enumerate(tqdm_val):
+                input_color = data[("color", 0, 0)].cuda()  # b 3 192 640
 
                 if opt.post_process:
                     # Post-processed results require each image to have two forward passes
                     input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
 
-                output = depth_decoder(encoder(input_color))
 
-                pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
+                # output = depth_decoder(encoder(input_color))
+                # pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
+                # pred_disp = pred_disp.cpu()[:, 0].numpy()
+                
+                model_outs = model['depth'](data, None,0)
+                pred_disp, _ = disp_to_depth(model_outs[("pred_disp", 0)], opt.min_depth, opt.max_depth)
                 pred_disp = pred_disp.cpu()[:, 0].numpy()
-
+            
                 if opt.post_process:
                     N = pred_disp.shape[0] // 2
                     pred_disp = batch_post_process_disparity(pred_disp[:N], pred_disp[N:, :, ::-1])
@@ -130,14 +181,15 @@ def evaluate(opt):
         pred_disps = np.load(opt.ext_disp_to_eval)
 
         if opt.eval_eigen_to_benchmark:
-            eigen_to_benchmark_ids = np.load(
-                os.path.join(splits_dir, "benchmark", "eigen_to_benchmark_ids.npy"))
-
+            eigen_to_benchmark_ids = np.load(os.path.join(splits_dir, "benchmark", "eigen_to_benchmark_ids.npy"))
             pred_disps = pred_disps[eigen_to_benchmark_ids]
 
     if opt.save_pred_disps:
-        output_path = os.path.join(
-            opt.load_weights_folder, "disps_{}_split.npy".format(opt.eval_split))
+        save_path=f'{opt.log_dir}/save_pred_disps'
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        
+        output_path = f'{save_path}/{opt.model_name}_{opt.eval_split}.npy'
         print("-> Saving predicted disparities to ", output_path)
         np.save(output_path, pred_disps)
 
@@ -164,12 +216,15 @@ def evaluate(opt):
 
     gt_path = os.path.join(splits_dir, opt.eval_split, "gt_depths.npz")
     gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1')["data"]
-
+    
+    # tmp1=gt_depths[0]
+    # tmp1=(tmp1-tmp1.min())/(tmp1.max()-tmp1.min())*255.0
+    # cv2.imwrite('./tmp2.jpg',tmp1)
+    
     print("-> Evaluating")
 
     if opt.eval_stereo:
-        print("   Stereo evaluation - "
-              "disabling median scaling, scaling by {}".format(STEREO_SCALE_FACTOR))
+        print("   Stereo evaluation - " "disabling median scaling, scaling by {}".format(STEREO_SCALE_FACTOR))
         opt.disable_median_scaling = True
         opt.pred_depth_scale_factor = STEREO_SCALE_FACTOR
     else:
