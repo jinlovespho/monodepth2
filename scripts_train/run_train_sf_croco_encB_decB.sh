@@ -1,10 +1,13 @@
 
+CUDA=2
 MODEL_NAME="sf_croco_encB_decB"
+WANDB_EXP_NAME="pho_server5_gpu${CUDA}_kitti_${MODEL_NAME}_color"
+MEMO="nothing_special"
+
 
 PATH_ARGS="
     --data_path /media/dataset1/kitti_raw_jpg
-    --log_dir /media/dataset1/jinlovespho/log/${MODEL_NAME}
-
+    --log_dir /media/dataset1/jinlovespho/log/${WANDB_EXP_NAME}
 "
 
 DATA_ARGS="
@@ -33,15 +36,15 @@ OPTIMIZATION_ARGS="
 LOGGING_ARGS="
     --wandb
     --wandb_proj_name 20240719_mf_depth
-    --wandb_exp_name pho_server5_gpu0_kitti_${MODEL_NAME}_coloraug
+    --wandb_exp_name ${WANDB_EXP_NAME}
     --log_frequency 250
     --save_frequency 5
-    --memo none
+    --memo ${MEMO}
 "
 
 
-CUDA_VISIBLE_DEVICES=2 python train.py  ${PATH_ARGS} \
-                                        ${DATA_ARGS} \
-                                        ${TRAINING_ARGS} \
-                                        ${OPTIMIZATION_ARGS} \
-                                        ${LOGGING_ARGS}
+CUDA_VISIBLE_DEVICES=${CUDA}    python train.py    ${PATH_ARGS} \
+                                                    ${DATA_ARGS} \
+                                                    ${TRAINING_ARGS} \
+                                                    ${OPTIMIZATION_ARGS} \
+                                                    ${LOGGING_ARGS}

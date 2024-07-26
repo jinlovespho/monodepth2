@@ -314,6 +314,60 @@ class Trainer:
             self.params_to_train.append( {'params':dec_params, 'lr':self.opt.learning_rate*0.1} )
             self.params_to_train.append( {'params':else_params, 'lr':self.opt.learning_rate})
         
+        
+        elif self.opt.model_name == 'mf_camap_croco_encB_decB':
+            from networks.croco_models.camap_croco_downstream import CAMap_CroCoDownstreamBinocular, croco_args_from_ckpt
+            from networks.croco_models.pos_embed import interpolate_pos_embed
+            from networks.croco_models.camap_head_downstream import CAMap_PixelwiseTaskWithDPT
+            
+            # Prepare model
+            ckpt = torch.load(self.opt.pretrained_weight, 'cpu')
+            croco_args = croco_args_from_ckpt(ckpt)
+            croco_args['img_size'] = (self.opt.height, self.opt.width)
+            print('Croco args: '+str(croco_args))
+            self.opt.croco_args = croco_args # saved for test time 
+            # prepare head 
+            num_channels = 1
+            # if self.opt.with_conf: num_channels += 1
+            print(f'Building head PixelwiseTaskWithDPT() with {num_channels} channel(s)')
+            head = CAMap_PixelwiseTaskWithDPT()
+            head.num_channels = num_channels
+            # build model and load pretrained weights
+            breakpoint()
+            self.models['depth'] = CAMap_CroCoDownstreamBinocular(head, **croco_args).to(self.device)
+            interpolate_pos_embed(self.models['depth'], ckpt['model'])
+            msg = self.models['depth'].load_state_dict(ckpt['model'], strict=False)
+            print(msg)
+            
+            # load monodepth2 pose network
+            self.models["pose_encoder"] = networks.ResnetEncoder(18, True, num_input_images=2 ).to(self.device)
+            self.models["pose"] = networks.PoseDecoder(self.models["pose_encoder"].num_ch_enc, num_input_features=1, num_frames_to_predict_for=2).to(self.device)
+            
+            # set trainable params
+            enc_params, enc_names = [], []
+            dec_params, dec_names = [], []
+            else_params, else_names = [], []
+            for name, param in self.models['depth'].named_parameters():
+                if 'enc_blocks' in name:
+                    enc_params.append(param)
+                    enc_names.append(name)
+                elif 'dec_blocks' in name:
+                    dec_params.append(param)
+                    dec_names.append(name)
+                else:
+                    else_params.append(param)
+                    else_names.append(name)
+            
+            depth_params=list(self.models['depth'].parameters())
+            assert len(depth_params) == len(enc_params) + len(dec_params) + len(else_params), 'CHECK TRAINABLE PARAMS !!'
+            
+            else_params+=list(self.models['pose_encoder'].parameters())
+            else_params+=list(self.models['pose'].parameters())
+            
+            self.params_to_train.append( {'params':enc_params, 'lr':self.opt.learning_rate*0.1} )
+            self.params_to_train.append( {'params':dec_params, 'lr':self.opt.learning_rate*0.1} )
+            self.params_to_train.append( {'params':else_params, 'lr':self.opt.learning_rate})
+            
   
         else:
             pass
@@ -419,7 +473,7 @@ class Trainer:
             inputs[key] = ipt.to(self.device)
         
         if self.opt.model_name == 'monodepth2_baseline':       
-            features = self.models["encoder"](inputs["color_aug", 0, 0])    # depth encoder
+            features = self.models["encoder"](inputs["color", 0, 0])    # depth encoder
             outputs = self.models["depth"](features)                        # depth decoder
             
         elif self.opt.model_name.startswith('sf'):
